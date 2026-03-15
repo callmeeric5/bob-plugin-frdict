@@ -1,0 +1,12 @@
+{
+  "versions": [
+    {
+      "version": "1.1.1",
+      "desc": "See GitHub Releases for details.",
+      "sha256": "cc4370f30d793f3034832101f50594068d1386371c218bc949bfc156f921ce75",
+      "url": "https://github.com/callmeeric5/bob-plugin-frdict/releases/download/v1.1.1/bob-plugin-le-dictionnaire@1.1.1.bobplugin",
+      "minBobVersion": "1.8.0",
+      "timestamp": 1773538827268
+    }
+  ]
+}
