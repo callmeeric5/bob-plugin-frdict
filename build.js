@@ -16,7 +16,7 @@ const INFO_JSON = {
   name: "Le-Dictionnaire Dictionary",
   author: "larousse_bob",
   summary: "French dictionary via le-dictionnaire.com",
-  homepage: "https://www.le-dictionnaire.com/",
+  homepage: "https://github.com/callmeeric5/bob-plugin-frdict",
   minBobVersion: "1.8.0",
   options: [],
   icon: "icon",

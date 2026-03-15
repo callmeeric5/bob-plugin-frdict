@@ -1,6 +1,6 @@
 {
   "name": "bob-plugin-le-dictionnaire",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bob plugin for le-dictionnaire.com",
   "main": "build.js",
   "scripts": {
