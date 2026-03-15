@@ -29,41 +29,28 @@ jobs:
       - name: Build Plugin
         run: node build.js
 
-      - name: Upload Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bobplugin
-          path: release/*.bobplugin
-
-      - name: Upload Appcast Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: appcast
-          path: appcast.json
+          name: plugin-assets
+          path: |
+            release/*.bobplugin
+            appcast.json
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download Artifact
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bobplugin
-          path: release
-
-      - name: Download Appcast
-        uses: actions/download-artifact@v4
-        with:
-          name: appcast
-          path: .
+          name: plugin-assets
+          path: ./dist
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.bobplugin
-
-      - name: Upload Appcast
-        uses: softprops/action-gh-release@v2
-        with:
-          files: appcast.json
+          files: |
+            dist/release/*.bobplugin
+            dist/appcast.json
