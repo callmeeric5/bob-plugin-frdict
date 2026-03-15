@@ -18,7 +18,36 @@ const INFO_JSON = {
   summary: "French dictionary via le-dictionnaire.com",
   homepage: "https://github.com/callmeeric5/bob-plugin-frdict",
   minBobVersion: "1.8.0",
-  options: [],
+  options: [
+    {
+      identifier: "frdic_enable",
+      type: "menu",
+      title: "Auto-add to Studylist",
+      defaultValue: "1",
+      menuValues: [
+        {
+          title: "Enabled",
+          value: "1"
+        },
+        {
+          title: "Disabled",
+          value: "0"
+        }
+      ]
+    },
+    {
+      identifier: "frdic_token",
+      type: "text",
+      title: "FRDic Authorization Token",
+      defaultValue: ""
+    },
+    {
+      identifier: "frdic_studylist_ids",
+      type: "text",
+      title: "Studylist IDs (comma-separated or JSON array)",
+      defaultValue: "[0]"
+    }
+  ],
   icon: "icon",
   appcast: "https://raw.githubusercontent.com/callmeeric5/bob-plugin-frdict/main/appcast.json"
 };

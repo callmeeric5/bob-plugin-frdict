@@ -1,6 +1,11 @@
 import { load, CheerioAPI } from "cheerio";
 import { api } from "@bob-plug/core";
 
+const OPTION_FRDIC_TOKEN = "frdic_token";
+const OPTION_FRDIC_STUDYLIST_IDS = "frdic_studylist_ids";
+const OPTION_FRDIC_ENABLE = "frdic_enable";
+const DEFAULT_STUDYLIST_IDS = [0];
+
 function supportLanguages() {
   return [
     "auto",
@@ -37,6 +42,160 @@ function supportLanguages() {
     "vi",
     "id"
   ];
+}
+
+function parseStudylistIds(raw: string | undefined) {
+  if (!raw) {
+    return DEFAULT_STUDYLIST_IDS.slice();
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return DEFAULT_STUDYLIST_IDS.slice();
+  }
+
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const ids = parsed
+          .map((item) => Number(item))
+          .filter((num) => Number.isFinite(num) && num >= 0);
+        return ids.length > 0 ? ids : DEFAULT_STUDYLIST_IDS.slice();
+      }
+    } catch (error) {
+      api.$log.error(`Failed to parse studylist ids JSON: ${String(error)}`);
+    }
+  }
+
+  const ids = trimmed
+    .split(/[,\s]+/)
+    .map((item) => Number(item))
+    .filter((num) => Number.isFinite(num) && num >= 0);
+  return ids.length > 0 ? ids : DEFAULT_STUDYLIST_IDS.slice();
+}
+
+function normalizeToken(token: string) {
+  const trimmed = (token || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.startsWith("NIS ")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("NIS\t")) {
+    return `NIS ${trimmed.slice(3).trim()}`;
+  }
+  return `NIS ${trimmed}`;
+}
+
+function formatHttpBody(resp) {
+  const data = resp?.data;
+  if (!data) {
+    return "";
+  }
+  if (typeof data === "string") {
+    return data;
+  }
+  if (typeof data?.toUTF8 === "function") {
+    return data.toUTF8() || "";
+  }
+  try {
+    return JSON.stringify(data);
+  } catch (error) {
+    return "";
+  }
+}
+
+function buildContextLine(dict) {
+  if (!dict || !Array.isArray(dict.additions)) {
+    return "";
+  }
+  const definition = dict.additions.find((item) => item.name === "Definition");
+  if (!definition || !definition.value) {
+    return "";
+  }
+  const firstLine = String(definition.value)
+    .split("\n")
+    .map((line) => normalizeText(line.replace(/^·\s*/, "")))
+    .find((line) => line);
+  return firstLine ? clampLine(firstLine, 120) : "";
+}
+
+function isStudylistEnabled() {
+  const enabled = api.getOption(OPTION_FRDIC_ENABLE);
+  return enabled !== "0";
+}
+
+function appendNotice(dict, notice: string) {
+  if (!notice) {
+    return dict;
+  }
+  const additions = Array.isArray(dict.additions) ? dict.additions.slice() : [];
+  additions.push({
+    name: "frdict",
+    value: notice
+  });
+  return { ...dict, additions };
+}
+
+function addToStudylist(word: string, dict): Promise<{ notice?: string }> {
+  if (!isStudylistEnabled()) {
+    return Promise.resolve({});
+  }
+
+  const tokenRaw = (api.getOption(OPTION_FRDIC_TOKEN) || "").trim();
+  const token = normalizeToken(tokenRaw);
+  if (!token) {
+    return Promise.resolve({ notice: "Missing authorization token; cannot add to studylist." });
+  }
+  const ids = parseStudylistIds(api.getOption(OPTION_FRDIC_STUDYLIST_IDS));
+  const contextLine = buildContextLine(dict);
+
+  const body: Record<string, any> = {
+    language: "fr",
+    word,
+    star: 2,
+    category_ids: ids
+  };
+  if (contextLine) {
+    body.context_line = contextLine;
+  }
+  const bodyJson = JSON.stringify(body);
+  const bodyData = api.$data.fromUTF8(bodyJson);
+
+  return api.$http
+    .post({
+      url: "https://api.frdic.com/api/open/v1/studylist/word/",
+      header: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        Authorization: token,
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8"
+      },
+      body: bodyData,
+      timeout: 3000
+    })
+    .then((resp) => {
+      const status = resp?.response?.statusCode;
+      const bodyText = formatHttpBody(resp);
+      if (status && status >= 400) {
+        api.$log.error(`FRDic studylist request failed: ${status}; body: ${bodyText}`);
+        if (status === 401 || status === 403) {
+          return {
+            notice: `failed to add to wordbook (HTTP ${status}). Check that the token includes the "NIS " prefix.`
+          };
+        }
+        return { notice: `failed to add to wordbook (HTTP ${status}).` };
+      }
+      return { notice: "saved to wordbook" };
+    })
+    .catch((error) => {
+      api.$log.error(`FRDic studylist request error: ${String(error)}`);
+      return { notice: "failed to add to wordbook. Please try again later." };
+    });
+
 }
 
 function translate(query) {
@@ -84,12 +243,50 @@ function translate(query) {
         return;
       }
 
-      query.onCompletion({
-        result: {
-          toDict: dict,
-          raw: { url }
-        }
-      });
+      if (dict._hasEntry === false) {
+        query.onCompletion({
+          error: {
+            type: "notFound",
+            message: "word not found"
+          }
+        });
+        return;
+      }
+
+      const shouldAddToStudylist = Boolean(dict && dict._hasEntry);
+
+      if (!shouldAddToStudylist) {
+        query.onCompletion({
+          result: {
+            toDict: dict,
+            raw: { url }
+          }
+        });
+        return;
+      }
+
+      addToStudylist(text, dict)
+        .then((result) => {
+          let finalDict = dict;
+          if (result.notice) {
+            finalDict = appendNotice(finalDict, result.notice);
+          }
+          query.onCompletion({
+            result: {
+              toDict: finalDict,
+              raw: { url }
+            }
+          });
+        })
+        .catch((error) => {
+          api.$log.error(`FRDic studylist unexpected error: ${String(error)}`);
+          query.onCompletion({
+            result: {
+              toDict: dict,
+              raw: { url }
+            }
+          });
+        });
     }
   });
 }
@@ -98,16 +295,24 @@ function parseHtml(html: string, word: string) {
   const $ = load(html);
   const displayWord = normalizeText(word);
 
+  if (
+    html &&
+    (html.indexOf("Le mot exact n'a pas été trouvé") !== -1 ||
+      html.indexOf("Aucun mot trouvé") !== -1)
+  ) {
+    return { word: displayWord, phonetics: [], additions: [], _hasEntry: false };
+  }
+
   const phonetic = normalizeText($(".motboxinfo").first().text());
   const motCat = normalizeText($(".motboxcat").first().text());
   const phoneticLine = [phonetic, motCat].filter(Boolean).join(" / ");
   const phonetics = phonetic
     ? [
-        {
-          type: "fr",
-          value: phoneticLine || phonetic
-        }
-      ]
+      {
+        type: "fr",
+        value: phoneticLine || phonetic
+      }
+    ]
     : [];
 
   const defbox = $(".defbox").first();
@@ -118,19 +323,19 @@ function parseHtml(html: string, word: string) {
   const additions = [];
   if (phoneticLine) {
     additions.push({
-      name: "Prononciation",
+      name: "Pronunciation",
       value: phoneticLine
     });
   }
   if (defs.length > 0) {
     additions.push({
-      name: "Définition",
+      name: "Definition",
       value: defs.map((item) => `· ${item}`).join("\n")
     });
   }
   if (constructions.length > 0) {
     additions.push({
-      name: "Constructions courantes",
+      name: "Common constructions",
       value: constructions.map((item) => `· ${item}`).join("\n")
     });
   }
@@ -139,10 +344,13 @@ function parseHtml(html: string, word: string) {
     return null;
   }
 
+  const hasEntry = Boolean(phoneticLine || defs.length > 0 || constructions.length > 0);
+
   return {
     word: displayWord,
     phonetics,
-    additions
+    additions,
+    _hasEntry: hasEntry
   };
 }
 
